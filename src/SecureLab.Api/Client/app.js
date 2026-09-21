@@ -2,6 +2,9 @@ const listElement = document.querySelector("#incident-list");
 const listStatusElement = document.querySelector("#list-status");
 const detailsElement = document.querySelector("#incident-details");
 const filterForm = document.querySelector("#filter-form");
+const severitySummaryButton = document.querySelector("#severity-summary-button");
+const severitySummaryStatus = document.querySelector("#severity-summary-status");
+const severitySummaryList = document.querySelector("#severity-summary-list");
 
 async function apiFetch(path, options = {}) {
   const response = await fetch(path, {
@@ -102,10 +105,30 @@ async function loadIncidentDetails(id) {
     detailsElement.textContent = `Помилка: ${error.message}`;
   }
 }
+async function loadSeveritySummary() {
+  severitySummaryStatus.textContent = "Завантаження…";
+  severitySummaryList.replaceChildren();
 
+  try {
+    const summary = await apiFetch("/api/incidents/severity-summary");
+
+    if (summary.length === 0) {
+      severitySummaryStatus.textContent = "Даних немає.";
+      return;
+    }
+
+    severitySummaryStatus.textContent = "";
+    for (const item of summary) {
+      const listItem = createTextElement("li", `${item.severity}: ${item.count}`);
+      severitySummaryList.append(listItem);
+    }
+  } catch (error) {
+    severitySummaryStatus.textContent = `Помилка: ${error.message}`;
+  }
+}
 filterForm.addEventListener("submit", (event) => {
   event.preventDefault();
   loadIncidents();
 });
-
+severitySummaryButton.addEventListener("click", loadSeveritySummary);
 loadIncidents();
