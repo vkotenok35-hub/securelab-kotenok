@@ -9,22 +9,47 @@ public static class Lab02Endpoints
 {
     public static void MapLab02Endpoints(this WebApplication app)
     {
-        app.MapGet("/api/incidents/search", async (string? q, string? sortBy, SecureLabDbContext db, CancellationToken ct) =>
+                app.MapGet("/api/incidents/search", async (string? q, string? sortBy, SecureLabDbContext db, CancellationToken ct) =>
         {
-            var order = sortBy switch
+            // sortBy: лише allowlist, значення клієнта ніколи не потрапляє в SQL
+            if (!(sortBy is null or "" or "createdAtUtc" or "severity" or "status"))
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["sortBy"] = ["Допустимі значення: createdAtUtc, severity, status."]
+                });
+
+            // q — значення, а не структура запиту; спецсимволи LIKE екрануємо, щоб шукати їх буквально
+            var escaped = (q ?? "").Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+            var pattern = "%" + escaped + "%";
+
+            var filtered = db.Incidents.AsNoTracking().Where(row =>
+                EF.Functions.ILike(row.Title, pattern, "\\")
+                || EF.Functions.ILike(row.Description, pattern, "\\"));
+
+            // ранги, а не алфавіт назв
+            var ordered = sortBy switch
             {
-                null or "" or "createdAtUtc" => "created_at_utc DESC",
-                "severity" => "severity", "status" => "status", _ => sortBy
+                "severity" => filtered.OrderBy(row =>
+                    row.Severity == IncidentSeverity.Critical ? 0
+                    : row.Severity == IncidentSeverity.High ? 1
+                    : row.Severity == IncidentSeverity.Medium ? 2 : 3),
+                "status" => filtered.OrderBy(row =>
+                    row.Status == IncidentStatus.New ? 0
+                    : row.Status == IncidentStatus.Triaged ? 1
+                    : row.Status == IncidentStatus.InProgress ? 2
+                    : row.Status == IncidentStatus.Resolved ? 3 : 4),
+                _ => filtered.OrderByDescending(row => row.CreatedAtUtc)
             };
-            var sql = "SELECT * FROM incidents WHERE title ILIKE '%" + (q ?? "")
-                + "%' OR description ILIKE '%" + (q ?? "") + "%' ORDER BY " + order + " LIMIT 50";
-            var rows = await db.Incidents.FromSqlRaw(sql).AsNoTracking().ToListAsync(ct);
+
+            // стабільний другий ключ і ліміт 50 рядків, як було в scaffold
+            var rows = await ordered.ThenBy(row => row.Id).Take(50).ToListAsync(ct);
             return Results.Ok(rows.Select(row => new
             {
                 row.Id, row.Title, row.Description,
                 Severity = row.Severity.ToString(), Status = row.Status.ToString(), row.CreatedAtUtc
             }));
         });
+		
                 app.MapPost("/api/incidents", async (CreateIncidentRequest request, SecureLabDbContext db, CancellationToken ct) =>
         {
             var now = DateTimeOffset.UtcNow; // фіксуємо час один раз
