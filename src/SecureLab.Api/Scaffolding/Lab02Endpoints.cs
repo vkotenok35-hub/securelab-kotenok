@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
-
+using System.Security.Claims;
 namespace SecureLab.Api.Scaffolding;
 
 // Навчальний старт ЛР 02. Запускати лише з локальними штучними даними.
@@ -50,7 +50,7 @@ public static class Lab02Endpoints
             }));
         });
 		
-                app.MapPost("/api/incidents", async (CreateIncidentRequest request, SecureLabDbContext db, CancellationToken ct) =>
+                app.MapPost("/api/incidents", async (CreateIncidentRequest request, HttpContext httpContext, SecureLabDbContext db, CancellationToken ct) =>
         {
             var now = DateTimeOffset.UtcNow; // фіксуємо час один раз
             var errors = new Dictionary<string, string[]>();
@@ -103,10 +103,13 @@ public static class Lab02Endpoints
                     title: "Інцидент уже існує",
                     detail: "Незакритий інцидент із таким заголовком уже зареєстровано.",
                     statusCode: StatusCodes.Status409Conflict);
-
+            // Власник береться лише з перевіреного principal, а не з тіла запиту.
+            var ownerIdValue = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!Guid.TryParse(ownerIdValue, out var ownerId)) return Results.Unauthorized();
+			
             var incident = new Incident
             {
-                Id = Guid.NewGuid(), OwnerUserId = DbSeeder.AliceId,
+                Id = Guid.NewGuid(), OwnerUserId = ownerId,
                 Title = title, Description = description, Severity = severity,
                 Status = IncidentStatus.New,
                 OccurredAtUtc = occurred!.Value.ToUniversalTime(),
@@ -117,7 +120,7 @@ public static class Lab02Endpoints
             return Results.Created($"/api/incidents/{incident.Id}", new CreatedIncidentResponse(
                 incident.Id, incident.Title, incident.Severity.ToString(),
                 incident.Status.ToString(), incident.OccurredAtUtc, incident.CreatedAtUtc));
-        });
+        }).RequireAuthorization();
     }
 }
 

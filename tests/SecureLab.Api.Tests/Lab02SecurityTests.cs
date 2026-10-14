@@ -20,7 +20,9 @@ public sealed class Lab02SecurityTests(SecureLabApiFactory factory)
         severity = "Low",
         occurredAtUtc = DateTimeOffset.UtcNow.AddMinutes(-10)
     };
-
+	    private static string SeedPassword() => Environment.GetEnvironmentVariable("SeedUsers__Password")
+        ?? throw new InvalidOperationException("Set local SeedUsers__Password outside Git.");
+		
     private async Task DeleteByTitleAsync(string title)
     {
         await using var scope = factory.Services.CreateAsyncScope();
@@ -32,6 +34,7 @@ public sealed class Lab02SecurityTests(SecureLabApiFactory factory)
     [Fact]
     public async Task Post_WithNumericSeverity_Returns400AndStoresNothing()
     {
+	    using var client = await factory.LoginAsync("alice", SeedPassword());	
         var title = $"T02-{Guid.NewGuid():N}";
         var body = new
         {
@@ -42,7 +45,7 @@ public sealed class Lab02SecurityTests(SecureLabApiFactory factory)
         };
         try
         {
-            using var response = await _client.PostAsJsonAsync("/api/incidents", body);
+            using var response = await client.PostAsJsonAsync("/api/incidents", body);
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
             Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
 
@@ -62,6 +65,7 @@ public sealed class Lab02SecurityTests(SecureLabApiFactory factory)
     [Fact]
     public async Task Post_WithTitleWithoutLetters_Returns400WithTitleKey()
     {
+        using var client = await factory.LoginAsync("alice", SeedPassword());		
         var body = new
         {
             title = "12345 ---",
@@ -69,7 +73,7 @@ public sealed class Lab02SecurityTests(SecureLabApiFactory factory)
             severity = "Low",
             occurredAtUtc = DateTimeOffset.UtcNow.AddMinutes(-10)
         };
-        using var response = await _client.PostAsJsonAsync("/api/incidents", body);
+        using var response = await client.PostAsJsonAsync("/api/incidents", body);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -80,13 +84,14 @@ public sealed class Lab02SecurityTests(SecureLabApiFactory factory)
     [Fact]
     public async Task Post_WithDuplicateActiveTitle_Returns409AndStoresOnlyOne()
     {
+        using var client = await factory.LoginAsync("alice", SeedPassword()); 
         var title = $"T03-{Guid.NewGuid():N}";
         try
         {
-            using var first = await _client.PostAsJsonAsync("/api/incidents", ValidBody(title));
+            using var first = await client.PostAsJsonAsync("/api/incidents", ValidBody(title));
             Assert.Equal(HttpStatusCode.Created, first.StatusCode);
 
-            using var second = await _client.PostAsJsonAsync("/api/incidents", ValidBody(title));
+            using var second = await client.PostAsJsonAsync("/api/incidents", ValidBody(title));
             Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
             Assert.Equal("application/problem+json", second.Content.Headers.ContentType?.MediaType);
 
@@ -124,6 +129,7 @@ public sealed class Lab02SecurityTests(SecureLabApiFactory factory)
     [Fact]
     public async Task Post_WithExtraServerManagedFields_IgnoresThemAndSetsServerValues()
     {
+		using var client = await factory.LoginAsync("alice", SeedPassword());
         var title = $"A02-{Guid.NewGuid():N}";
         var sentId = Guid.Parse("22222222-2222-2222-2222-222222222222");
         var body = new
@@ -139,7 +145,7 @@ public sealed class Lab02SecurityTests(SecureLabApiFactory factory)
         };
         try
         {
-            using var response = await _client.PostAsJsonAsync("/api/incidents", body);
+            using var response = await client.PostAsJsonAsync("/api/incidents", body);
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
