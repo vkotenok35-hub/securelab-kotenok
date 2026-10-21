@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using System.Security.Claims;
+using SecureLab.Api.Application.Access;
 namespace SecureLab.Api.Scaffolding;
 
 // Навчальний старт ЛР 02. Запускати лише з локальними штучними даними.
@@ -9,7 +10,7 @@ public static class Lab02Endpoints
 {
     public static void MapLab02Endpoints(this WebApplication app)
     {
-                app.MapGet("/api/incidents/search", async (string? q, string? sortBy, SecureLabDbContext db, CancellationToken ct) =>
+                app.MapGet("/api/incidents/search", async (string? q, string? sortBy, HttpContext httpContext, SecureLabDbContext db, CancellationToken ct) =>
         {
             // sortBy: лише allowlist, значення клієнта ніколи не потрапляє в SQL
             if (!(sortBy is null or "" or "createdAtUtc" or "severity" or "status"))
@@ -22,7 +23,7 @@ public static class Lab02Endpoints
             var escaped = (q ?? "").Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
             var pattern = "%" + escaped + "%";
 
-            var filtered = db.Incidents.AsNoTracking().Where(row =>
+			var filtered = db.Incidents.AsNoTracking().VisibleTo(httpContext.User).Where(row =>
                 EF.Functions.ILike(row.Title, pattern, "\\")
                 || EF.Functions.ILike(row.Description, pattern, "\\"));
 
@@ -48,7 +49,7 @@ public static class Lab02Endpoints
                 row.Id, row.Title, row.Description,
                 Severity = row.Severity.ToString(), Status = row.Status.ToString(), row.CreatedAtUtc
             }));
-        });
+        }).RequireAuthorization();
 		
                 app.MapPost("/api/incidents", async (CreateIncidentRequest request, HttpContext httpContext, SecureLabDbContext db, CancellationToken ct) =>
         {

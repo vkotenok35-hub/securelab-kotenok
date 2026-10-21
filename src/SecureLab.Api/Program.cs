@@ -4,6 +4,8 @@ using Scalar.AspNetCore;
 using SecureLab.Api.Application.Incidents;
 using SecureLab.Api.Data;
 using SecureLab.Api.Presentation.Endpoints;
+using Microsoft.AspNetCore.Authorization;
+using SecureLab.Api.Application.Access;
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -20,6 +22,7 @@ var connectionString = builder.Configuration.GetConnectionString("SecureLab")
 builder.Services.AddDbContext<SecureLabDbContext>(options =>
     options.UseNpgsql(connectionString));
 builder.Services.AddScoped<IncidentQueries>();
+builder.Services.AddSingleton<IAuthorizationHandler, IncidentAuthorizationHandler>();
 
 builder.AddLab03Identity();
 
@@ -66,6 +69,7 @@ app.MapGet("/health", async (SecureLabDbContext dbContext, CancellationToken can
     .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
 app.MapIncidentEndpoints();
+app.MapIncidentMutationEndpoints();
 app.MapLab03Identity();
 app.MapLab02Endpoints();
 app.MapFallbackToFile("index.html");

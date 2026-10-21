@@ -1,4 +1,6 @@
+using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
+using SecureLab.Api.Application.Access;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using SecureLab.Api.Presentation.Contracts;
@@ -9,11 +11,12 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
 {
     public async Task<IReadOnlyList<IncidentListItemResponse>> GetListAsync(
         IncidentStatus? status,
+        ClaimsPrincipal user,
         CancellationToken cancellationToken)
     {
         logger.LogInformation("Loading incidents with status filter {Status}", status);
 
-        var query = dbContext.Incidents.AsNoTracking();
+        var query = dbContext.Incidents.AsNoTracking().VisibleTo(user);
         if (status is not null)
         {
             query = query.Where(incident => incident.Status == status);
@@ -31,7 +34,12 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
             .ToListAsync(cancellationToken);
     }
 
-    public Task<IncidentDetailsResponse?> GetDetailsAsync(Guid id, CancellationToken cancellationToken)
+    // Рішення про доступ ухвалено раніше (resource handler); тут лише проєкція.
+    // includeInternal — лише для Analyst: internal comment не потрапляє у відповідь Reporter.
+    public Task<IncidentDetailsResponse?> GetDetailsAsync(
+        Guid id,
+        bool includeInternal,
+        CancellationToken cancellationToken)
     {
         logger.LogInformation("Loading incident {IncidentId}", id);
 
@@ -48,7 +56,7 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
                 incident.CreatedAtUtc,
                 incident.Owner.DisplayName,
                 incident.Comments
-                    .Where(comment => !comment.IsInternal)
+                    .Where(comment => includeInternal || !comment.IsInternal)
                     .OrderBy(comment => comment.CreatedAtUtc)
                     .Select(comment => new IncidentCommentResponse(
                         comment.Id,
@@ -58,11 +66,15 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
                     .ToList()))
             .SingleOrDefaultAsync(cancellationToken);
     }
-	public async Task<IReadOnlyList<IncidentSeveritySummaryResponse>> GetSeveritySummaryAsync(
+
+    public async Task<IReadOnlyList<IncidentSeveritySummaryResponse>> GetSeveritySummaryAsync(
+        ClaimsPrincipal user,
         CancellationToken cancellationToken)
     {
+        // Обмеження за суб'єктом стоїть до групування, а не після.
         var counts = await dbContext.Incidents
             .AsNoTracking()
+            .VisibleTo(user)
             .GroupBy(incident => incident.Severity)
             .Select(group => new { Severity = group.Key, Count = group.Count() })
             .ToListAsync(cancellationToken);

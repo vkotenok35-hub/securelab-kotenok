@@ -11,7 +11,6 @@ namespace SecureLab.Api.Tests;
 public sealed class Lab02SecurityTests(SecureLabApiFactory factory)
     : IClassFixture<SecureLabApiFactory>
 {
-    private readonly HttpClient _client = factory.CreateClient();
 
     private static object ValidBody(string title) => new
     {
@@ -106,8 +105,9 @@ public sealed class Lab02SecurityTests(SecureLabApiFactory factory)
     [Fact]
     public async Task Search_ControlInput_ReturnsEmptySet()
     {
+        using var client = await factory.LoginAsync("alice", SeedPassword());
         var q = Uri.EscapeDataString("zz-no-match' OR TRUE -- ");
-        var incidents = await _client.GetFromJsonAsync<List<JsonElement>>($"/api/incidents/search?q={q}");
+        var incidents = await client.GetFromJsonAsync<List<JsonElement>>($"/api/incidents/search?q={q}");
 
         Assert.NotNull(incidents);
         Assert.Empty(incidents);
@@ -117,14 +117,14 @@ public sealed class Lab02SecurityTests(SecureLabApiFactory factory)
     [Fact]
     public async Task Search_Usb_ReturnsExactlyOneSeedIncident()
     {
-        var incidents = await _client.GetFromJsonAsync<List<JsonElement>>("/api/incidents/search?q=USB");
+        using var client = await factory.LoginAsync("alice", SeedPassword());
+        var incidents = await client.GetFromJsonAsync<List<JsonElement>>("/api/incidents/search?q=USB");
 
         Assert.NotNull(incidents);
         var single = Assert.Single(incidents);
         Assert.Equal(Guid.Parse("20000000-0000-0000-0000-000000000005"),
             single.GetProperty("id").GetGuid());
     }
-
     // A-02: server-managed поля з тіла запиту ігноруються
     [Fact]
     public async Task Post_WithExtraServerManagedFields_IgnoresThemAndSetsServerValues()
