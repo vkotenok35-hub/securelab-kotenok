@@ -1,18 +1,25 @@
 let current;
 const id = () => encodeURIComponent(document.querySelector("#incident-id").value.trim());
 const status = document.querySelector("#status");
+
+// Єдиний безпечний helper: значення з API потрапляє лише в текстовий вузол,
+// а структуру елементів задає код. Повторний render замінює дітей, а не додає нових.
+function renderText(container, text) {
+  container.replaceChildren(document.createTextNode(text ?? ""));
+  return container;
+}
+
 async function load() {
   const response = await fetch(`/api/incidents/${id()}`);
   status.textContent = `GET: ${response.status}`;
   if (!response.ok) return;
   current = await response.json();
   document.querySelector("#title").textContent = current.title;
-  document.querySelector("#description").innerHTML = current.description;
-  document.querySelector("#comments").replaceChildren();
+  renderText(document.querySelector("#description"), current.description);
+  const comments = document.querySelector("#comments");
+  comments.replaceChildren();
   for (const comment of current.comments ?? []) {
-    const paragraph = document.createElement("p");
-    paragraph.innerHTML = comment.text;
-    document.querySelector("#comments").append(paragraph);
+    comments.append(renderText(document.createElement("p"), comment.text));
   }
   document.querySelector("#edit").elements.description.value = current.description;
 }
