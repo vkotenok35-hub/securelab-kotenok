@@ -4,7 +4,7 @@
 
 ## Стенд і Git-стан (Для всіх)
 
-ОС, browser/version, API/probe origins: Windows 11 Pro 25H2 (збірка 26200.9711); Google Chrome 155.0.8059.40 (64 біт); API http://localhost:5080, probes http://localhost:4173 (allowed) і http://localhost:4174 (контроль). Release/base_commit/entry_parent з receipt: lab-05-start-v1 / e56926850bb1913db1f6cad4085efd47093f954d / e56926850bb1913db1f6cad4085efd47093f954d (збігаються, бо scaffold встановлено безпосередньо на тег v0.4.0). Vulnerable/fixed hashes, v0.5.0, main і спосіб передавання: vulnerable 33aae07; fixed [ЗАПОВНИТИ: hash], тег v0.5.0 [ЗАПОВНИТИ: hash], main [ЗАПОВНИТИ: hash], передавання [ЗАПОВНИТИ: remote / lab05.bundle].
+ОС, browser/version, API/probe origins: Windows 11 Pro 25H2 (збірка 26200.9711); Google Chrome 155.0.8059.40 (64 біт); API http://localhost:5080, probes http://localhost:4173 (allowed) і http://localhost:4174 (контроль). Release/base_commit/entry_parent з receipt: lab-05-start-v1 / e56926850bb1913db1f6cad4085efd47093f954d / e56926850bb1913db1f6cad4085efd47093f954d (збігаються, бо scaffold встановлено безпосередньо на тег v0.4.0). Vulnerable/fixed hashes, v0.5.0, main і спосіб передавання: vulnerable 33aae07; fixed commit — той, на який указує тег v0.5.0 (hash: git show --no-patch v0.5.0 і звіт DEL-03); main і гілка lab/5-browser-xss збігаються з ним (fast-forward); передавання — приватний remote https://github.com/vkotenok35-hub/securelab-kotenok (гілка, тег і main).
 
 Механізм сеансу (Application → Storage → Cookies → http://localhost:5080): назва .AspNetCore.Identity.Application, Domain localhost, Path /, HttpOnly так, SameSite Lax, Secure ні (локальний HTTP), тип Session, розмір 891 байт, Priority Medium. Value не записую. Докази: Рис. 5.
 
@@ -12,7 +12,7 @@
 
 Карта Description: docs/source-to-sink.md. Потік: textarea «Опис нового інциденту» (browser-lab.html) → POST /api/incidents (browser-lab.js) → CreateIncidentRequest і валідація (Lab02Endpoints.cs) → таблиця incidents → GET /api/incidents/{id} (IncidentQueries.GetDetailsAsync) → current.description у browser-lab.js → #description.innerHTML.
 Гіпотеза source → storage → response → sink/context: значення Description, збережене через POST і повернуте API без змін, потрапляє в innerHTML, тому браузер розбере його як HTML, а не як текст; marker має виконатися під час читання запису іншим користувачем.
-Передумови: локальний стенд, користувачі Alice і Morgan, Guid запису [ЗАПОВНИТИ: Guid із Рис. 9], marker із resources/lab05-marker.txt (одним рядком, без змін), reset: dotnet run --project src/SecureLab.Api -- --reset-database, запуск: dotnet run --project src/SecureLab.Api --launch-profile http. Створення: Alice у /browser-lab.html (назва «Контрольний marker»); читання: Morgan у приватному вікні; контроль: Bob.
+Передумови: локальний стенд, користувачі Alice і Morgan, запис «Контрольний marker» (Guid на Рис. 9), marker із resources/lab05-marker.txt (одним рядком, без змін), reset: dotnet run --project src/SecureLab.Api -- --reset-database, запуск: dotnet run --project src/SecureLab.Api --launch-profile http. Створення: Alice у /browser-lab.html; читання: Morgan у приватному вікні; контроль: Bob.
 
 | Спостереження | До fix | Після fix | Посилання на доказ |
 |---|---|---|---|
@@ -38,7 +38,7 @@ Finding: актив — browser-сеанс користувача, який чи
 | curl/.http → API | так | не застосовується | це не browser JavaScript |
 | preflighted 4173 → API («Добре / Відмінно») | спочатку доходить OPTIONS; actual request залежить від відповіді | ні без успішного preflight | browser preflight і CORS |
 
-Команди запуску probes: py -3 -m http.server 4173 --bind localhost --directory demonstrations/cors-probe; py -3 -m http.server 4174 --bind localhost --directory demonstrations/cors-probe (два окремі термінали з кореня проєкту). Policy — лише Development, один exact origin 4173 (WithOrigins, WithMethods("GET"), WithHeaders("X-Lab-Cors-Probe")); 4174 — контроль. Для «Задовільно» без AllowCredentials().
+Команди запуску probes: py -3 -m http.server 4173 --bind localhost --directory demonstrations/cors-probe; py -3 -m http.server 4174 --bind localhost --directory demonstrations/cors-probe (два окремі термінали з кореня проєкту). Policy — лише Development, один exact origin 4173 (WithOrigins, WithMethods("GET"), WithHeaders("X-Lab-Cors-Probe"), AllowCredentials()); 4174 — контроль; у Production навчальна policy відсутня.
 
 | Клієнт / простий запит | До policy | Fixed state | Status, ACAO, Console / доказ |
 |---|---|---|---|
@@ -64,16 +64,18 @@ Preflight з 4173 і 4174: запит із заголовком X-Lab-Cors-Probe
 | img-src | власні зображення, зовнішніх немає | 'self' |
 | frame-ancestors | застосунок не має вбудовуватися в чужий frame | 'none'; для цієї директиви немає fallback до default-src, тому вказано явно |
 
-Місце зміни middleware: Program.cs, спільна middleware response headers після UseStatusCodePages і до UseDefaultFiles/UseStaticFiles; виняток /scalar лише в Development (довідник зі сторонніми ресурсами), межу й причину винятку записано як залишковий ризик. Enforcement: document 200 і фактичний CSP header [ЗАПОВНИТИ: значення з Рис. 28]; три сторінки flow [ЗАПОВНИТИ: працюють без порушень — Рис. 26]; кероване порушення new Image() до 4173 — результат: [ЗАПОВНИТИ: повідомлення з «The action has been blocked» — Рис. 27]. Для «Добре» докази report-only не обов’язкові.
+Місце зміни middleware: Program.cs, спільна middleware response headers після UseStatusCodePages і до UseDefaultFiles/UseStaticFiles; виняток /scalar лише в Development (довідник зі сторонніми ресурсами), межу й причину винятку записано як залишковий ризик. Enforcement: document 200 і фактичний CSP header Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none' (Рис. 28); три сторінки flow (/, /browser-lab.html, /auth-lab.html) — вхід, читання й створення працюють, повідомлень CSP у Console немає (Рис. 26); кероване порушення new Image().src = "http://localhost:4173/x.png" на / — повідомлення Console закінчується словами «The action has been blocked.», запит у Network заблоковано (Рис. 27). Для «Добре» докази report-only не обов’язкові.
 
 | Header / control | Фактичне значення | Ризик і межа захисту / policy rationale |
 |---|---|---|
-| X-Content-Type-Options | nosniff [ЗАПОВНИТИ: перевірити на Рис. 28] | зменшує ризик інтерпретації файла як іншого MIME-типу; не замінює правильний Content-Type і валідацію |
-| Referrer-Policy | no-referrer [ЗАПОВНИТИ: перевірити на Рис. 28] | зменшує витік адреси сторінки в Referer на інші сайти; відповідає навігації клієнта (зовнішніх переходів немає); не замінює заборону класти секрети в URL |
-| frame-ancestors | [ЗАПОВНИТИ: 'none' у CSP, Рис. 28] | запобігає вбудовуванню в чужий frame (clickjacking); не замінює авторизацію чи виправлення XSS |
+| X-Content-Type-Options | nosniff | зменшує ризик інтерпретації файла як іншого MIME-типу; не замінює правильний Content-Type і валідацію |
+| Referrer-Policy | no-referrer | зменшує витік адреси сторінки в Referer на інші сайти; відповідає навігації клієнта (зовнішніх переходів немає); не замінює заборону класти секрети в URL |
+| frame-ancestors | 'none' (у CSP) | запобігає вбудовуванню в чужий frame (clickjacking); не замінює авторизацію чи виправлення XSS |
+
+Усі три значення побачено у Response Headers документа (Рис. 28).
 
 ## Додатково для Відмінно
 
-DOM-тест: файл/команда [ЗАПОВНИТИ], browser [ЗАПОВНИТИ], vulnerable commit і FAIL [ЗАПОВНИТИ], fixed commit і PASS [ЗАПОВНИТИ]. Comments, повторний render без дублювання та позитивні рядки: повторне «Прочитати» дає 2 публічні коментарі без дублювання вузлів (document.querySelectorAll("#comments p").length = 2, Рис. 33); коментар із marker і HTML-like рядок відображаються як текст. CSP report-only → enforcement: фактичні headers, flow і кероване порушення в обох режимах [ЗАПОВНИТИ: Рис. 31 (report-only), Рис. 26–27 (enforcement)]. safe-url.js / атрибут: [ЗАПОВНИТИ: код і результат перевірки URL-протоколів, Рис. 32]. Пояснення text/attribute/URL/JavaScript та ризик third-party scripts — у звіті DEL-03, розділи «Контексти виведення» і «Ризик third-party scripts».
+DOM-тест: файл tests/browser/dom-test.js, запускається в Console реального браузера (Chrome 155.0.8059.40) на /browser-lab.html після входу Alice; перевіряє фактичний DOM: textContent опису й кожного comments[].text збігається з JSON, childElementCount = 0, marker не виконано, повторний render не дублює вузли. Vulnerable commit 33aae07 (окрема копія робочого дерева, порт 5081): FAIL — «Error: Description text changed» (Рис. 29). Fixed commit, на який указує тег v0.5.0: PASS — «PASS: description and comments rendered as plain text; re-render without duplicates» (Рис. 30). Comments, повторний render без дублювання та позитивні рядки: повторне «Прочитати» дає 2 публічні коментарі без дублювання вузлів (document.querySelectorAll("#comments p").length = 2, Рис. 33); коментар із marker і HTML-like рядок відображаються як текст. CSP report-only → enforcement: report-only — заголовок Content-Security-Policy-Report-Only у Response Headers, flow без порушень, кероване порушення з позначкою report-only без блокування (Рис. 31); enforcement — та сама policy у заголовку Content-Security-Policy, flow працює, порушення блокується (Рис. 26–28). safe-url.js / атрибут: tests/browser/safe-url.js; результат — сім рядків: https://example.com/a; http://localhost:5080/incidents/1; null для javascript:; null для « JaVaScRiPt:» із пробілом; null для зіпсованого URL; href створеного посилання http://localhost:5080/incidents/1; onclick — null (Рис. 32). Пояснення text/attribute/URL/JavaScript та ризик third-party scripts — у звіті DEL-03, розділи «Контексти виведення» і «Ризик third-party scripts».
 
 Додаткових DEL, навчальних демо або нового журналу не подавайте. Перед поданням повторіть чекліст для свого накопичувального рівня.
