@@ -48,27 +48,37 @@ if (resetRequested)
     return;
 }
 
-app.UseExceptionHandler();
-app.UseStatusCodePages();
-
 var csp = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'";
 
+// Заголовки безпеки виставляються в OnStarting: exception handler очищає відповідь,
+// тому заголовки, встановлені раніше, на 500 зникали.
 app.Use(async (context, next) =>
 {
-    context.Response.Headers.XContentTypeOptions = "nosniff";
-    context.Response.Headers.Append("Referrer-Policy", "no-referrer");
-
-    // /scalar — окремий Development-довідник зі сторонніми ресурсами: виняток лише для нього
-    var isDevelopmentApiReference =
-        app.Environment.IsDevelopment()
-        && context.Request.Path.StartsWithSegments("/scalar");
-    if (!isDevelopmentApiReference)
+    context.Response.OnStarting(() =>
     {
-        context.Response.Headers["Content-Security-Policy"] = csp;
-    }
+        var headers = context.Response.Headers;
+        headers.XContentTypeOptions = "nosniff";
+        headers["Referrer-Policy"] = "no-referrer";
+
+        // /scalar — Development-довідник зі сторонніми ресурсами: виняток лише для нього
+        var isDevelopmentApiReference =
+            app.Environment.IsDevelopment()
+            && context.Request.Path.StartsWithSegments("/scalar");
+        if (!isDevelopmentApiReference)
+        {
+            headers["Content-Security-Policy"] = csp;
+        }
+
+        return Task.CompletedTask;
+    });
 
     await next(context);
 });
+
+app.UseExceptionHandler();
+app.UseStatusCodePages();
+
+
 
 if (app.Environment.IsDevelopment())
 {
