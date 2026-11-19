@@ -58,10 +58,11 @@ public sealed class Lab06RaceTests(SecureLabApiFactory factory, ITestOutputHelpe
             using var first = await host.LoginAsync("morgan", SeedPassword());
             using var second = await host.LoginAsync("morgan", SeedPassword());
 
+            var etag = await first.GetETagAsync($"/api/incidents/{id}");
             var responses = await Task.WhenAll(
-                first.PostAsync($"/api/incidents/{id}/triage", null),
-                second.PostAsync($"/api/incidents/{id}/triage", null));
-
+                first.SendWithIfMatchAsync(HttpMethod.Post, $"/api/incidents/{id}/triage", etag),
+                second.SendWithIfMatchAsync(HttpMethod.Post, $"/api/incidents/{id}/triage", etag));
+				
             await using var scope = host.Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<SecureLabDbContext>();
             var rows = await db.IncidentStatusHistory.CountAsync(

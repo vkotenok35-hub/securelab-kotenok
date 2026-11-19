@@ -78,8 +78,11 @@ public static class IncidentEndpoints
         }
 
         var details = await queries.GetDetailsAsync(id, user.IsAnalyst(), cancellationToken);
-        return details is null ? IncidentErrors.NotFound() : Results.Ok(details);
-    }
+        if (details is null) return IncidentErrors.NotFound();
+
+        // Сильний ETag для умовних змін (If-Match у PUT, DELETE і triage)
+        IncidentPreconditions.SetETag(httpContext, incident);
+        return Results.Ok(details);    }
 
     private static async Task<IResult> GetSeveritySummaryAsync(
         HttpContext httpContext,

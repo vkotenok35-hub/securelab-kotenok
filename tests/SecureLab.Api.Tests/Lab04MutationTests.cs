@@ -83,7 +83,8 @@ public sealed class Lab04MutationTests(SecureLabApiFactory factory) : IClassFixt
         var id = await CreateAsync(alice, $"A04-del-{Guid.NewGuid():N}");
         try
         {
-            using var delete = await alice.DeleteAsync($"/api/incidents/{id}");
+            var etag = await alice.GetETagAsync($"/api/incidents/{id}");
+            using var delete = await alice.SendWithIfMatchAsync(HttpMethod.Delete, $"/api/incidents/{id}", etag);
             Assert.Equal(HttpStatusCode.NoContent, delete.StatusCode);
             Assert.Null(await LoadAsync(id));
         }
@@ -125,13 +126,15 @@ public sealed class Lab04MutationTests(SecureLabApiFactory factory) : IClassFixt
         var id = await CreateAsync(alice, $"A07-{Guid.NewGuid():N}");
         try
         {
-            using var first = await morgan.PostAsync($"/api/incidents/{id}/triage", null);
+            var etag = await morgan.GetETagAsync($"/api/incidents/{id}");
+            using var first = await morgan.SendWithIfMatchAsync(HttpMethod.Post, $"/api/incidents/{id}/triage", etag);
             Assert.Equal(HttpStatusCode.OK, first.StatusCode);
             using var document = JsonDocument.Parse(await first.Content.ReadAsStringAsync());
             Assert.Equal("Triaged", document.RootElement.GetProperty("status").GetString());
             Assert.Equal(IncidentStatus.Triaged, (await LoadAsync(id))!.Status);
 
-            using var second = await morgan.PostAsync($"/api/incidents/{id}/triage", null);
+            var newTag = first.Headers.ETag!.Tag;
+            using var second = await morgan.SendWithIfMatchAsync(HttpMethod.Post, $"/api/incidents/{id}/triage", newTag);
             Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
         }
         finally { await DeleteIncidentAsync(id); }
@@ -157,7 +160,8 @@ public sealed class Lab04MutationTests(SecureLabApiFactory factory) : IClassFixt
                 status = "Closed",
                 id = Guid.NewGuid()
             };
-            using var response = await alice.PutAsJsonAsync($"/api/incidents/{id}", body);
+            var etag = await alice.GetETagAsync($"/api/incidents/{id}");
+            using var response = await alice.SendWithIfMatchAsync(HttpMethod.Put, $"/api/incidents/{id}", etag, JsonContent.Create(body));
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
             var saved = await LoadAsync(id);
