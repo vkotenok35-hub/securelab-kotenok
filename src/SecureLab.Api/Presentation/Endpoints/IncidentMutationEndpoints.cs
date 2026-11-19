@@ -181,8 +181,12 @@ public static class IncidentMutationEndpoints
             CreatedAtUtc = now
         });
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new { id = incident.Id, status = incident.Status.ToString() });
-    }
+
+        // Аудит успішного привілейованого переходу: лише ідентифікатори, стани й час (без тексту й облікових даних)
+        logger.LogInformation(
+            "audit.transition subject={SubjectId} action={Action} resource={ResourceId} result={Result} from={From} to={To} occurredAtUtc={OccurredAtUtc:O} trace={TraceId}",
+            userId, "incident.triage", incident.Id, "allowed", oldStatus, incident.Status, now, TraceId(httpContext));
+        return Results.Ok(new { id = incident.Id, status = incident.Status.ToString() });    }
 
     private static async Task<IResult> GetCommentAsync(
         Guid id,
