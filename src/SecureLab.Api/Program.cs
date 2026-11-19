@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authorization;
 using SecureLab.Api.Application.Access;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Antiforgery;
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -40,6 +41,12 @@ builder.Services.AddRateLimiter(options =>
                 Window = TimeSpan.FromSeconds(10),   // window
                 QueueLimit = 0                       // без черги
             }));
+});
+// Antiforgery: ім'я header і cookie — контракт між сервером і клієнтом
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = "X-CSRF-TOKEN";
+    options.Cookie.Name = "SecureLab.Antiforgery";
 });
 if (builder.Environment.IsDevelopment())
 {
@@ -126,6 +133,13 @@ app.MapIncidentEndpoints();
 app.MapIncidentMutationEndpoints();
 app.MapLab03Identity();
 app.MapLab02Endpoints();
+// Видача request token: лише після входу, same-origin; відповідь не кешується
+app.MapGet("/api/csrf-token", (IAntiforgery antiforgery, HttpContext http) =>
+{
+    var tokens = antiforgery.GetAndStoreTokens(http);
+    http.Response.Headers.CacheControl = "no-store";
+    return Results.Ok(new { token = tokens.RequestToken });
+}).RequireAuthorization();
 app.MapFallbackToFile("index.html");
 
 app.Run();

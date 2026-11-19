@@ -6,6 +6,7 @@ using SecureLab.Api.Application.Access;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using SecureLab.Api.Presentation.Contracts;
+using SecureLab.Api.Presentation.Filters;
 
 namespace SecureLab.Api.Presentation.Endpoints;
 
@@ -14,10 +15,10 @@ public static class IncidentMutationEndpoints
     public static IEndpointRouteBuilder MapIncidentMutationEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var incidents = endpoints.MapGroup("/api/incidents").WithTags("Incidents").RequireAuthorization();
-        incidents.MapPut("/{id:guid}", UpdateAsync);
-        incidents.MapDelete("/{id:guid}", DeleteAsync);
-        incidents.MapPost("/{id:guid}/triage", TriageAsync);
-
+        incidents.MapPut("/{id:guid}", UpdateAsync).AddEndpointFilter<AntiforgeryFilter>();
+        incidents.MapDelete("/{id:guid}", DeleteAsync).AddEndpointFilter<AntiforgeryFilter>();
+        incidents.MapPost("/{id:guid}/triage", TriageAsync).AddEndpointFilter<AntiforgeryFilter>();
+		
         endpoints.MapGroup("/api/incident-comments").WithTags("Incidents").RequireAuthorization()
             .MapGet("/{id:guid}", GetCommentAsync);
 

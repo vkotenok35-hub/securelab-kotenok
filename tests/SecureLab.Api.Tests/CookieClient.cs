@@ -5,7 +5,7 @@ namespace SecureLab.Api.Tests;
 
 public static class CookieClient
 {
-    public static async Task<HttpClient> LoginAsync(this WebApplicationFactory<Program> factory, string userName, string password)
+    public static async Task<HttpClient> LoginAsync(this WebApplicationFactory<Program> factory, string userName, string password, bool withAntiforgery = true)
     {
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -17,6 +17,7 @@ public static class CookieClient
             client.Dispose();
             throw new InvalidOperationException("Study login failed (credentials omitted).");
         }
+        if (withAntiforgery) await client.UseAntiforgeryTokenAsync();		        
         return client;
     }
 }

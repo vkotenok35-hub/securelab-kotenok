@@ -12,6 +12,7 @@ document.querySelector("#me").addEventListener("click", async () => {
   result.textContent = `${response.status}: ${await response.text()}`;
 });
 document.querySelector("#logout").addEventListener("click", async () => {
-  const response = await fetch("/api/auth/logout", { method: "POST" });
+  const response = await Csrf.mutate("/api/auth/logout", { method: "POST" });
+  if (response.ok) Csrf.reset();
   result.textContent = `Logout: ${response.status}`;
 });

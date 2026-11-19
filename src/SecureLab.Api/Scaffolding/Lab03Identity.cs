@@ -5,6 +5,7 @@ using System.Net.Mail;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using System.Threading.RateLimiting;
+using SecureLab.Api.Presentation.Filters;
 namespace SecureLab.Api.Scaffolding;
 
 public static class Lab03Identity
@@ -147,7 +148,7 @@ public static class Lab03Identity
             logger.LogInformation("Auth event {EventType}: result {Result}, trace {TraceId}",
                 "logout", "success", httpContext.TraceIdentifier);
             return Results.NoContent();
-        });
+        }).AddEndpointFilter<AntiforgeryFilter>();
                 // Користувач береться лише з перевіреного principal (cookie), а не з header чи тіла запиту.
         app.MapGet("/api/me", async (HttpContext context, SecureLabDbContext db) =>
         {
