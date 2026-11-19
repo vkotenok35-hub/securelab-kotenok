@@ -7,6 +7,7 @@ using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using SecureLab.Api.Presentation.Contracts;
 using SecureLab.Api.Presentation.Filters;
+using SecureLab.Api.Application.Incidents;
 
 namespace SecureLab.Api.Presentation.Endpoints;
 
@@ -137,6 +138,7 @@ public static class IncidentMutationEndpoints
         HttpContext httpContext,
         SecureLabDbContext db,
         IAuthorizationService authorization,
+        ITriageProbe probe,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -164,7 +166,8 @@ public static class IncidentMutationEndpoints
             return Results.Problem(title: "Перехід неможливий",
                 detail: "Тріаж можливий лише для нового інциденту.",
                 statusCode: StatusCodes.Status409Conflict);
-
+        // Тестовий шов: у звичайній роботі нічого не робить
+        await probe.AfterReadAsync(ct);
         var analyst = await db.Users.FirstAsync(item => item.Id == userId!.Value, ct);
         var now = DateTimeOffset.UtcNow;
         var oldStatus = incident.Status;
