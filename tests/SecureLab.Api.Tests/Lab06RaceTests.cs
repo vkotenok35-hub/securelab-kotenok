@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
 using SecureLab.Api.Application.Incidents;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
@@ -29,9 +30,9 @@ public sealed class Lab06RaceTests(SecureLabApiFactory factory, ITestOutputHelpe
         }
     }
 
-    // F-03, стан ДО виправлення: характеризаційний тест. Він проходить, поки дефект є.
+    // F-03, стан ПІСЛЯ виправлення: токен конкурентності й обмеження в БД лишають один перехід.
     [Fact]
-    public async Task F03_BeforeFix_ConcurrentTriage_ProducesDuplicateTransition()
+    public async Task F03_AfterFix_ConcurrentTriage_ProducesSingleTransition()
     {
         using var host = factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
         {
@@ -69,8 +70,8 @@ public sealed class Lab06RaceTests(SecureLabApiFactory factory, ITestOutputHelpe
             var statuses = responses.Select(r => (int)r.StatusCode).Order().ToArray();
             output.WriteLine($"triage responses: {string.Join(", ", statuses)}; Triaged history rows: {rows}");
 
-            Assert.Equal(new[] { 200, 200 }, statuses);   // обидва пройшли перевірку New
-            Assert.Equal(2, rows);                          // дубль переходу в історії
+            Assert.Equal(new[] { 200, 412 }, statuses);   // один пройшов, другий відхилено як конфлікт
+            Assert.Equal(1, rows);                         // один запис переходу
             foreach (var response in responses) response.Dispose();
         }
         finally
@@ -78,6 +79,55 @@ public sealed class Lab06RaceTests(SecureLabApiFactory factory, ITestOutputHelpe
             await using var scope = host.Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<SecureLabDbContext>();
             await db.Incidents.Where(item => item.Id == id).ExecuteDeleteAsync();
+        }
+    }
+
+    private static IncidentStatusHistory TriagedRow(Guid incidentId, DateTimeOffset now) => new()
+    {
+        Id = Guid.NewGuid(),
+        IncidentId = incidentId,
+        ChangedByUserId = DbSeeder.MorganId,
+        OldStatus = IncidentStatus.New,
+        NewStatus = IncidentStatus.Triaged,
+        Note = "Тест обмеження.",
+        CreatedAtUtc = now
+    };
+
+    // Захист у глибину: обмеження в БД діє незалежно від токена конкурентності.
+    [Fact]
+    public async Task F03_Index_RejectsSecondTriagedTransition_IndependentlyOfToken()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var incidentId = Guid.NewGuid();
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<SecureLabDbContext>();
+        db.Incidents.Add(new Incident
+        {
+            Id = incidentId,
+            OwnerUserId = DbSeeder.AliceId,
+            Title = $"F03-index-{Guid.NewGuid():N}",
+            Description = "Контрольний запис обмеження F-03.",
+            Severity = IncidentSeverity.Low,
+            Status = IncidentStatus.Triaged,
+            OccurredAtUtc = now,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        });
+        db.IncidentStatusHistory.Add(TriagedRow(incidentId, now));
+        await db.SaveChangesAsync();
+
+        try
+        {
+            db.IncidentStatusHistory.Add(TriagedRow(incidentId, now));
+            var error = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+            var postgres = Assert.IsType<PostgresException>(error.InnerException);
+            Assert.Equal(PostgresErrorCodes.UniqueViolation, postgres.SqlState);
+        }
+        finally
+        {
+            await using var cleanup = factory.Services.CreateAsyncScope();
+            var cleanupDb = cleanup.ServiceProvider.GetRequiredService<SecureLabDbContext>();
+            await cleanupDb.Incidents.Where(item => item.Id == incidentId).ExecuteDeleteAsync();
         }
     }
 }
