@@ -6,6 +6,8 @@ using SecureLab.Api.Data;
 using SecureLab.Api.Presentation.Endpoints;
 using Microsoft.AspNetCore.Authorization;
 using SecureLab.Api.Application.Access;
+using System.Security.Claims;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -25,6 +27,20 @@ builder.Services.AddScoped<IncidentQueries>();
 builder.Services.AddSingleton<IAuthorizationHandler, IncidentAuthorizationHandler>();
 
 builder.AddLab03Identity();
+// Ліміт пошуку: partition = id автентифікованого користувача (не IP і не довільний header)
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("search", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "anonymous",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 20,                    // quota
+                Window = TimeSpan.FromSeconds(10),   // window
+                QueueLimit = 0                       // без черги
+            }));
+});
 if (builder.Environment.IsDevelopment())
 {
     builder.Services.AddCors(options =>

@@ -49,7 +49,7 @@ public static class Lab02Endpoints
                 row.Id, row.Title, row.Description,
                 Severity = row.Severity.ToString(), Status = row.Status.ToString(), row.CreatedAtUtc
             }));
-        }).RequireAuthorization();
+        }).RequireAuthorization().RequireRateLimiting("search");
 		
                 app.MapPost("/api/incidents", async (CreateIncidentRequest request, HttpContext httpContext, SecureLabDbContext db, CancellationToken ct) =>
         {
