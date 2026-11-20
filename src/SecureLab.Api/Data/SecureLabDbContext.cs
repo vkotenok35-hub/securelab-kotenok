@@ -40,6 +40,7 @@ public sealed class SecureLabDbContext(DbContextOptions<SecureLabDbContext> opti
         incident.Property(item => item.OccurredAtUtc).HasColumnName("occurred_at_utc");
         incident.Property(item => item.CreatedAtUtc).HasColumnName("created_at_utc");
         incident.Property(item => item.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        incident.Property(item => item.Version).IsRowVersion();		
         incident.HasIndex(item => item.OwnerUserId);
         incident.HasIndex(item => item.Status);
         incident.HasIndex(item => item.Severity);
@@ -76,6 +77,12 @@ public sealed class SecureLabDbContext(DbContextOptions<SecureLabDbContext> opti
         history.Property(item => item.NewStatus).HasColumnName("new_status").HasConversion<string>().HasMaxLength(24);
         history.Property(item => item.Note).HasColumnName("note").HasMaxLength(1000);
         history.Property(item => item.CreatedAtUtc).HasColumnName("created_at_utc");
+        // Захист у глибину (F-03): не більше одного запису переходу в Triaged для одного інциденту.
+        // Звичайний індекс за incident_id збережено явно (раніше його створювала конвенція для FK).
+        history.HasIndex(item => item.IncidentId, "IX_incident_status_history_incident_id");
+        history.HasIndex(item => item.IncidentId, "ux_incident_status_history_triaged")
+            .IsUnique()
+            .HasFilter("new_status = 'Triaged'");	
         history.HasOne(item => item.Incident)
             .WithMany(item => item.StatusHistory)
             .HasForeignKey(item => item.IncidentId)

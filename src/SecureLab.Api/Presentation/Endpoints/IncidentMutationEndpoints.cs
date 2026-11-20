@@ -6,7 +6,9 @@ using SecureLab.Api.Application.Access;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using SecureLab.Api.Presentation.Contracts;
-
+using SecureLab.Api.Presentation.Filters;
+using SecureLab.Api.Application.Incidents;
+using Npgsql;
 namespace SecureLab.Api.Presentation.Endpoints;
 
 public static class IncidentMutationEndpoints
@@ -14,10 +16,10 @@ public static class IncidentMutationEndpoints
     public static IEndpointRouteBuilder MapIncidentMutationEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var incidents = endpoints.MapGroup("/api/incidents").WithTags("Incidents").RequireAuthorization();
-        incidents.MapPut("/{id:guid}", UpdateAsync);
-        incidents.MapDelete("/{id:guid}", DeleteAsync);
-        incidents.MapPost("/{id:guid}/triage", TriageAsync);
-
+        incidents.MapPut("/{id:guid}", UpdateAsync).AddEndpointFilter<AntiforgeryFilter>();
+        incidents.MapDelete("/{id:guid}", DeleteAsync).AddEndpointFilter<AntiforgeryFilter>();
+        incidents.MapPost("/{id:guid}/triage", TriageAsync).AddEndpointFilter<AntiforgeryFilter>();
+		
         endpoints.MapGroup("/api/incident-comments").WithTags("Incidents").RequireAuthorization()
             .MapGet("/{id:guid}", GetCommentAsync);
 
@@ -56,6 +58,8 @@ public static class IncidentMutationEndpoints
         if (!(await authorization.AuthorizeAsync(user, incident, IncidentOperations.Update)).Succeeded)
             return await DenyAsync(authorization, user, incident);
 
+        // Умовний запит: версія з If-Match має збігатися з поточною (428 без заголовка, 412 при розбіжності)
+        if (IncidentPreconditions.Check(httpContext, incident) is { } precondition) return precondition;
         var now = DateTimeOffset.UtcNow;
         var errors = new Dictionary<string, string[]>();
 
@@ -105,7 +109,16 @@ public static class IncidentMutationEndpoints
         incident.Severity = severity;
         incident.OccurredAtUtc = occurred!.Value.ToUniversalTime();
         incident.UpdatedAtUtc = now;
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return ConcurrencyConflict();
+        }
+
+        IncidentPreconditions.SetETag(httpContext, incident);
         return Results.NoContent();
     }
 
@@ -126,8 +139,17 @@ public static class IncidentMutationEndpoints
         if (!(await authorization.AuthorizeAsync(user, incident, IncidentOperations.Delete)).Succeeded)
             return await DenyAsync(authorization, user, incident);
 
+        if (IncidentPreconditions.Check(httpContext, incident) is { } precondition) return precondition;
         db.Incidents.Remove(incident);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return ConcurrencyConflict();
+        }
+
         return Results.NoContent();
     }
 
@@ -136,6 +158,7 @@ public static class IncidentMutationEndpoints
         HttpContext httpContext,
         SecureLabDbContext db,
         IAuthorizationService authorization,
+        ITriageProbe probe,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -158,12 +181,15 @@ public static class IncidentMutationEndpoints
         if (!(await authorization.AuthorizeAsync(user, incident, IncidentOperations.Triage)).Succeeded)
             return await DenyAsync(authorization, user, incident);
 
+        if (IncidentPreconditions.Check(httpContext, incident) is { } precondition) return precondition;
         // Допустимий лише New → Triaged; поточний статус читає сервер, наступний встановлює він же.
         if (incident.Status != IncidentStatus.New)
             return Results.Problem(title: "Перехід неможливий",
                 detail: "Тріаж можливий лише для нового інциденту.",
+				type: "urn:securelab:problem:invalid-transition",
                 statusCode: StatusCodes.Status409Conflict);
-
+        // Тестовий шов: у звичайній роботі нічого не робить
+        await probe.AfterReadAsync(ct);
         var analyst = await db.Users.FirstAsync(item => item.Id == userId!.Value, ct);
         var now = DateTimeOffset.UtcNow;
         var oldStatus = incident.Status;
@@ -179,10 +205,33 @@ public static class IncidentMutationEndpoints
             Note = "Тріаж виконано аналітиком.",
             CreatedAtUtc = now
         });
-        await db.SaveChangesAsync(ct);
+               try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return ConcurrencyConflict();
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            return ConcurrencyConflict();
+        }
+
+        // Аудит успішного привілейованого переходу: лише ідентифікатори, стани й час (без тексту й облікових даних)
+        logger.LogInformation(
+            "audit.transition subject={SubjectId} action={Action} resource={ResourceId} result={Result} from={From} to={To} occurredAtUtc={OccurredAtUtc:O} trace={TraceId}",
+            userId, "incident.triage", incident.Id, "allowed", oldStatus, incident.Status, now, TraceId(httpContext));
+			IncidentPreconditions.SetETag(httpContext, incident);
         return Results.Ok(new { id = incident.Id, status = incident.Status.ToString() });
     }
-
+	    // Конфлікт конкурентності: інший запит змінив ресурс між читанням і збереженням
+    internal static IResult ConcurrencyConflict() =>
+        Results.Problem(
+            title: "Запис змінився",
+            detail: "Інший запит уже змінив цей інцидент. Перечитайте запис і повторіть дію.",
+            statusCode: StatusCodes.Status412PreconditionFailed,
+            type: "urn:securelab:problem:concurrency-conflict");
     private static async Task<IResult> GetCommentAsync(
         Guid id,
         HttpContext httpContext,

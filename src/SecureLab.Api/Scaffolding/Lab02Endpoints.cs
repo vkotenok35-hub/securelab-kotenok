@@ -4,7 +4,7 @@ using SecureLab.Api.Data.Entities;
 using System.Security.Claims;
 using SecureLab.Api.Application.Access;
 namespace SecureLab.Api.Scaffolding;
-
+using SecureLab.Api.Presentation.Filters;
 // Навчальний старт ЛР 02. Запускати лише з локальними штучними даними.
 public static class Lab02Endpoints
 {
@@ -49,7 +49,7 @@ public static class Lab02Endpoints
                 row.Id, row.Title, row.Description,
                 Severity = row.Severity.ToString(), Status = row.Status.ToString(), row.CreatedAtUtc
             }));
-        }).RequireAuthorization();
+        }).RequireAuthorization().RequireRateLimiting("search");
 		
                 app.MapPost("/api/incidents", async (CreateIncidentRequest request, HttpContext httpContext, SecureLabDbContext db, CancellationToken ct) =>
         {
@@ -121,7 +121,7 @@ public static class Lab02Endpoints
             return Results.Created($"/api/incidents/{incident.Id}", new CreatedIncidentResponse(
                 incident.Id, incident.Title, incident.Severity.ToString(),
                 incident.Status.ToString(), incident.OccurredAtUtc, incident.CreatedAtUtc));
-        }).RequireAuthorization();
+        }).RequireAuthorization().AddEndpointFilter<AntiforgeryFilter>();
     }
 }
 

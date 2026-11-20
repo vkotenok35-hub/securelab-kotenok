@@ -1,0 +1,58 @@
+(() => {
+  let token = null;
+  let pending = null;
+  let generation = 0;
+
+  function reset() {
+    token = null;
+    pending = null;
+    generation++;
+  }
+
+  async function ensureToken() {
+    if (token) return token;
+    if (pending) return pending;
+    const current = generation;
+    const operation = (async () => {
+      const response = await fetch("/api/csrf-token", { credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) {
+        const error = new Error(`Token request failed: ${response.status}`);
+        error.status = response.status;
+        throw error;
+      }
+      const data = await response.json();
+      if (current !== generation) throw new Error("Session changed; request a fresh token.");
+      if (typeof data.token !== "string" || !data.token) throw new Error("Invalid token response.");
+      token = data.token;
+      return token;
+    })();
+    pending = operation;
+    try { return await operation; }
+    finally { if (pending === operation) pending = null; }
+  }
+
+  async function mutate(url, options = {}) {
+    const method = (options.method || "POST").toUpperCase();
+    if (!["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+      throw new Error("Use normal fetch for read requests.");
+    }
+    const target = new URL(url, location.href);
+    if (target.origin !== location.origin) throw new Error("Token must stay on the same origin.");
+    let value;
+    try {
+      value = await ensureToken();
+    } catch (error) {
+      // немає входу (401) або інша відмова видачі: повертаємо її статус, не мовчимо
+      if (error.status) return new Response(null, { status: error.status });
+      throw error;
+    }
+    const headers = new Headers(options.headers);
+    headers.set("X-CSRF-TOKEN", value);
+    const response = await fetch(target, { ...options, method, headers, credentials: "same-origin" });
+    if (response.status === 400 || response.status === 401) reset();
+    return response;
+  }
+
+  window.Csrf = { reset, ensureToken, mutate };
+  window.addEventListener("pageshow", reset);
+})();

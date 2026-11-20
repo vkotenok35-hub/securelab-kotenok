@@ -87,6 +87,7 @@ $("#login-form").addEventListener("submit", async (event) => {
     method: "POST", headers: jsonHeaders, body: JSON.stringify(body),
   });
   if (response.status === 204) {
+	  Csrf.reset();
     $("#login-result").textContent = "Вхід виконано (204).";
     await refreshState();
     await loadProfile();
@@ -109,7 +110,7 @@ $("#incident-form").addEventListener("submit", async (event) => {
     severity: data.get("severity"),
     occurredAtUtc: new Date(data.get("occurredAt")).toISOString(),
   };
-  const response = await apiFetch("/api/incidents", {
+  const response = await Csrf.mutate("/api/incidents", {
     method: "POST", headers: jsonHeaders, body: JSON.stringify(body),
   });
   if (response.status === 201) {
@@ -126,7 +127,8 @@ $("#incident-form").addEventListener("submit", async (event) => {
 });
 
 $("#logout-button").addEventListener("click", async () => {
-  const response = await apiFetch("/api/auth/logout", { method: "POST" });
+  const response = await Csrf.mutate("/api/auth/logout", { method: "POST" });
+  if (response.ok) Csrf.reset();
   clearProfile();
   $("#incident-result").textContent = "";
   $("#login-result").textContent = "";

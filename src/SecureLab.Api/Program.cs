@@ -6,6 +6,9 @@ using SecureLab.Api.Data;
 using SecureLab.Api.Presentation.Endpoints;
 using Microsoft.AspNetCore.Authorization;
 using SecureLab.Api.Application.Access;
+using System.Security.Claims;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Antiforgery;
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -22,9 +25,30 @@ var connectionString = builder.Configuration.GetConnectionString("SecureLab")
 builder.Services.AddDbContext<SecureLabDbContext>(options =>
     options.UseNpgsql(connectionString));
 builder.Services.AddScoped<IncidentQueries>();
+builder.Services.AddSingleton<ITriageProbe, NoOpTriageProbe>();
 builder.Services.AddSingleton<IAuthorizationHandler, IncidentAuthorizationHandler>();
 
 builder.AddLab03Identity();
+// Ліміт пошуку: partition = id автентифікованого користувача (не IP і не довільний header)
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("search", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "anonymous",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 20,                    // quota
+                Window = TimeSpan.FromSeconds(10),   // window
+                QueueLimit = 0                       // без черги
+            }));
+});
+// Antiforgery: ім'я header і cookie — контракт між сервером і клієнтом
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = "X-CSRF-TOKEN";
+    options.Cookie.Name = "SecureLab.Antiforgery";
+});
 if (builder.Environment.IsDevelopment())
 {
     builder.Services.AddCors(options =>
@@ -48,27 +72,37 @@ if (resetRequested)
     return;
 }
 
-app.UseExceptionHandler();
-app.UseStatusCodePages();
-
 var csp = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'";
 
+// Заголовки безпеки виставляються в OnStarting: exception handler очищає відповідь,
+// тому заголовки, встановлені раніше, на 500 зникали.
 app.Use(async (context, next) =>
 {
-    context.Response.Headers.XContentTypeOptions = "nosniff";
-    context.Response.Headers.Append("Referrer-Policy", "no-referrer");
-
-    // /scalar — окремий Development-довідник зі сторонніми ресурсами: виняток лише для нього
-    var isDevelopmentApiReference =
-        app.Environment.IsDevelopment()
-        && context.Request.Path.StartsWithSegments("/scalar");
-    if (!isDevelopmentApiReference)
+    context.Response.OnStarting(() =>
     {
-        context.Response.Headers["Content-Security-Policy"] = csp;
-    }
+        var headers = context.Response.Headers;
+        headers.XContentTypeOptions = "nosniff";
+        headers["Referrer-Policy"] = "no-referrer";
+
+        // /scalar — Development-довідник зі сторонніми ресурсами: виняток лише для нього
+        var isDevelopmentApiReference =
+            app.Environment.IsDevelopment()
+            && context.Request.Path.StartsWithSegments("/scalar");
+        if (!isDevelopmentApiReference)
+        {
+            headers["Content-Security-Policy"] = csp;
+        }
+
+        return Task.CompletedTask;
+    });
 
     await next(context);
 });
+
+app.UseExceptionHandler();
+app.UseStatusCodePages();
+
+
 
 if (app.Environment.IsDevelopment())
 {
@@ -100,6 +134,13 @@ app.MapIncidentEndpoints();
 app.MapIncidentMutationEndpoints();
 app.MapLab03Identity();
 app.MapLab02Endpoints();
+// Видача request token: лише після входу, same-origin; відповідь не кешується
+app.MapGet("/api/csrf-token", (IAntiforgery antiforgery, HttpContext http) =>
+{
+    var tokens = antiforgery.GetAndStoreTokens(http);
+    http.Response.Headers.CacheControl = "no-store";
+    return Results.Ok(new { token = tokens.RequestToken });
+}).RequireAuthorization();
 app.MapFallbackToFile("index.html");
 
 app.Run();
